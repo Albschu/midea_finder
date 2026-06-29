@@ -1,0 +1,10 @@
+# local runtime config may contain SMTP credentials – never commit it
+config.json
+# persisted stock state
+state.json
+state.json.tmp
+
+__pycache__/
+*.pyc
+.venv/
+venv/

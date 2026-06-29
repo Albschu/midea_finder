@@ -1,0 +1,37 @@
+{
+  "check_interval_seconds": 300,
+  "request_delay_seconds": 2,
+
+  "email": {
+    "to_addr": "albert.schuetz1@gmx.de",
+    "from_addr": "albert.schuetz1@gmx.de",
+    "subject": "✅ Midea PortaSplit ist wieder verfügbar!",
+    "smtp_host": "mail.gmx.net",
+    "smtp_port": 465,
+    "smtp_ssl": true,
+    "_comment_credentials": "SMTP user/password come from the env vars MIDEA_SMTP_USER and MIDEA_SMTP_PASS. For GMX you must enable POP3/IMAP access in the GMX settings first."
+  },
+
+  "products": [
+    {
+      "name": "Midea mobile Split-Klimaanlage PortaSplit",
+      "retailer": "OBI",
+      "url": "https://www.obi.de/p/8620890/midea-mobile-split-klimaanlage-portasplit"
+    },
+    {
+      "name": "Midea Mobiles Klimagerät PortaSplit 12000 BTU/h",
+      "retailer": "toom",
+      "url": "https://toom.de/p/mobiles-klimageraet-portasplit-12000-btuh/9350668"
+    },
+    {
+      "name": "Midea Split-Klimaanlage PortaSplit Cool 8000 BTU/h",
+      "retailer": "toom",
+      "url": "https://toom.de/p/split-klimaanlage-portasplit-cool-8000btuh/10515238"
+    },
+    {
+      "name": "Midea Klimasplitgerät PortaSplit 12.000 BTU",
+      "retailer": "BAUHAUS",
+      "url": "https://www.bauhaus.info/klimaanlagen/midea-klimasplitgeraet-portasplit-12000-btu/p/31934233"
+    }
+  ]
+}

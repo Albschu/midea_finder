@@ -1,0 +1,12 @@
+[Unit]
+Description=Midea PortaSplit stock check (one shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# --- edit these ---
+WorkingDirectory=%h/midea_finder
+ExecStart=/usr/bin/python3 %h/midea_finder/midea_finder.py --once
+Environment=MIDEA_SMTP_USER=dein-login@gmx.de
+Environment=MIDEA_SMTP_PASS=dein-passwort
