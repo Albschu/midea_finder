@@ -124,6 +124,45 @@ results, newly = mf.run_once(cfg2, tmp_state, verbose=False, send_mail=False)
 check("third run: no repeat alert", len(newly), 0)
 os.remove(tmp_state)
 
+# 8b. Geo filtering: only stores within radius are kept; online always kept.
+osna = {"name": "Osnabrück", "lat": 52.2799, "lon": 8.0472, "radius_km": 100}
+# sanity: Münster ~52 km, Bremen ~104 km
+d_ms = mf.haversine_km(52.2799, 8.0472, 51.9607, 7.6261)
+d_hb = mf.haversine_km(52.2799, 8.0472, 53.0793, 8.8017)
+check("Münster within 100km", d_ms < 100, True)
+check("Bremen beyond 100km", d_hb > 100, True)
+
+cfg_geo = {
+    "location": osna,
+    "include_online": True,
+    "include_local_stores": True,
+    "products": [
+        {"kind": "online", "name": "On", "retailer": "OBI", "url": "https://x"},
+        {"kind": "store", "name": "Near", "retailer": "OBI", "city": "Münster",
+         "lat": 51.9607, "lon": 7.6261, "url": "TODO"},
+        {"kind": "store", "name": "Far", "retailer": "toom", "city": "Bremen",
+         "lat": 53.0793, "lon": 8.8017, "url": "TODO"},
+    ],
+}
+sel = mf.select_products(cfg_geo)
+names = sorted(p["name"] for p, _ in sel)
+check("Bremen filtered out, Münster + online kept", names, ["Near", "On"])
+
+# online offers excluded when include_online is false
+cfg_no_online = dict(cfg_geo, include_online=False)
+sel2 = mf.select_products(cfg_no_online)
+check("include_online=false drops online", all(p["kind"] == "store" for p, _ in sel2), True)
+
+# local stores excluded when include_local_stores is false
+cfg_no_local = dict(cfg_geo, include_local_stores=False)
+sel3 = mf.select_products(cfg_no_local)
+check("include_local_stores=false drops stores", all(p["kind"] == "online" for p, _ in sel3), True)
+
+# store without a real URL reports 'not configured' rather than crashing
+res_store = mf.check_product(cfg_geo["products"][1])
+check("store w/o URL -> unknown", res_store["status"], mf.STATUS_UNKNOWN)
+check("store w/o URL -> note", "noch nicht" in res_store["detail"], True)
+
 # 9. UI page + dashboard JSON are well-formed.
 check("page has title", "Midea PortaSplit Watcher" in mf.PAGE_HTML, True)
 check("page polls status endpoint", "/api/status" in mf.PAGE_HTML, True)

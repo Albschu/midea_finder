@@ -23,6 +23,33 @@ the price, a link to the shop, a countdown to the next check, and a
 **"Jetzt prüfen"** button to check immediately. The page refreshes itself; just
 leave the tab open.
 
+## Search scope: online + stores near a location
+
+The search is limited to **online offers** plus **physical stores within a
+radius of a location** — preconfigured to **Osnabrück, 100 km**:
+
+```json
+"include_online": true,
+"include_local_stores": true,
+"location": { "name": "Osnabrück", "lat": 52.2799, "lon": 8.0472, "radius_km": 100 }
+```
+
+Each product entry has a `kind`:
+
+- `"online"` — a normal online product page (these work out of the box).
+- `"store"` — a physical market, with `store`, `city`, `lat`, `lon`. The program
+  computes the great-circle distance to `location` and **silently drops any
+  market beyond `radius_km`** (e.g. the seeded Bremen market at ~104 km is
+  filtered out). Markets in range show up with their distance in the dashboard.
+
+> **Important about store stock:** the chains (OBI, toom, BAUHAUS, …) expose
+> per-market stock only through private, undocumented APIs that differ per
+> retailer. The seeded store entries therefore carry a `"url": "TODO…"` and show
+> *"Markt-URL noch nicht hinterlegt"* until you paste a working
+> per-market availability URL for that shop. The geography/scoping is fully
+> functional today; only the per-market fetch needs that URL. Toggle
+> `include_local_stores` to `false` to search **online offers only**.
+
 ## How it works
 
 1. For every product in `config.json` it downloads the retailer's product page.

@@ -135,6 +135,63 @@ def now_iso() -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Geo helpers (limit local-store search to a radius around a location)
+# --------------------------------------------------------------------------- #
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance between two lat/lon points in kilometres."""
+    import math
+
+    r = 6371.0  # Earth radius in km
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlmb = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def store_distance_km(product: dict, location: dict):
+    """Distance of a store product from the configured location, or None."""
+    if not location:
+        return None
+    try:
+        return haversine_km(
+            float(location["lat"]), float(location["lon"]),
+            float(product["lat"]), float(product["lon"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def select_products(cfg: dict):
+    """
+    Apply the configured scope: keep online offers and only those stores within
+    the location radius. Returns a list of (product, distance_km) pairs;
+    distance_km is None for online offers.
+    """
+    location = cfg.get("location")
+    radius = float(location["radius_km"]) if location and location.get("radius_km") else None
+    include_online = cfg.get("include_online", True)
+    include_local = cfg.get("include_local_stores", True)
+
+    selected = []
+    for product in cfg.get("products", []):
+        kind = product.get("kind", "online")
+        if kind == "store":
+            if not include_local:
+                continue
+            dist = store_distance_km(product, location)
+            # if we have both a radius and a known distance, enforce the radius
+            if radius is not None and dist is not None and dist > radius:
+                continue
+            selected.append((product, dist))
+        else:  # online
+            if not include_online:
+                continue
+            selected.append((product, None))
+    return selected
+
+
+# --------------------------------------------------------------------------- #
 # Fetching + availability detection
 # --------------------------------------------------------------------------- #
 def fetch(url: str, timeout: int = 25) -> str:
@@ -234,18 +291,26 @@ def detect_availability(html: str):
 
 def check_product(product: dict) -> dict:
     """Check a single product and return a result dict."""
-    url = product["url"]
-    name = product.get("name", url)
+    url = product.get("url")
+    name = product.get("name", url or "")
     retailer = product.get("retailer", "")
+    kind = product.get("kind", "online")
     result = {
         "name": name,
         "retailer": retailer,
         "url": url,
+        "kind": kind,
+        "store": product.get("store"),
+        "city": product.get("city"),
         "status": STATUS_UNKNOWN,
         "price": None,
         "detail": "",
         "checked_at": now_iso(),
     }
+    # store entries without a verified market URL are in-scope but not yet checkable
+    if not url or str(url).startswith("TODO"):
+        result["detail"] = "Markt-URL noch nicht hinterlegt"
+        return result
     try:
         html = fetch(url)
     except HTTPError as exc:
@@ -329,13 +394,14 @@ def run_once(cfg: dict, state_path: str, verbose: bool = True, send_mail: bool =
     back in stock.
     """
     state = load_state(state_path)
-    products = cfg.get("products", [])
+    selected = select_products(cfg)
     results = []
     newly_available = []
 
-    for product in products:
+    for product, distance in selected:
         result = check_product(product)
-        key = result["url"]
+        result["distance_km"] = round(distance, 1) if distance is not None else None
+        key = result["url"] or f"{result['retailer']}|{result['store']}|{result['name']}"
         prev = state.get(key, {}).get("status", STATUS_UNKNOWN)
         curr = result["status"]
         result["previous"] = prev
@@ -343,9 +409,12 @@ def run_once(cfg: dict, state_path: str, verbose: bool = True, send_mail: bool =
         if verbose:
             icon = {"in_stock": "🟢", "out_of_stock": "🔴"}.get(curr, "⚪")
             price = f" ({result['price']})" if result.get("price") else ""
+            where = "🌐 online" if result["kind"] == "online" else \
+                f"📍 {result.get('city') or result.get('store') or '?'}" \
+                + (f" {result['distance_km']}km" if result.get("distance_km") is not None else "")
             print(
-                f"{icon} {result['retailer'] or '-':9} {result['name'][:45]:45} "
-                f"-> {curr}{price}  [{result['detail']}]"
+                f"{icon} {result['retailer'] or '-':9} {where:18} "
+                f"{result['name'][:40]:40} -> {curr}{price}  [{result['detail']}]"
             )
 
         # A real transition into stock (was out/unknown -> in).
@@ -361,7 +430,17 @@ def run_once(cfg: dict, state_path: str, verbose: bool = True, send_mail: bool =
         }
         results.append(result)
         # be polite between requests
-        time.sleep(cfg.get("request_delay_seconds", 2))
+        if result.get("url") and not str(result.get("url")).startswith("TODO"):
+            time.sleep(cfg.get("request_delay_seconds", 2))
+
+    # display order: in-stock first, then online before stores, then by distance
+    def sort_key(r):
+        status_rank = {STATUS_IN: 0, STATUS_OUT: 1, STATUS_UNKNOWN: 2}.get(r["status"], 3)
+        kind_rank = 0 if r["kind"] == "online" else 1
+        dist = r["distance_km"] if r.get("distance_km") is not None else 0
+        return (status_rank, kind_rank, dist)
+
+    results.sort(key=sort_key)
 
     if newly_available and send_mail:
         if verbose:
@@ -420,6 +499,7 @@ _dashboard = {
     "interval": 300,
     "checking": False,
     "send_mail": False,
+    "scope": "",
 }
 _check_now = threading.Event()   # set by the UI "Check now" button
 _stop = threading.Event()
@@ -437,6 +517,7 @@ PAGE_HTML = """<!doctype html>
   header { padding: 20px 24px; background: #171a21; border-bottom: 1px solid #262b35;
            display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
   h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  .scope { font-size: 12px; color: #9aa3b2; margin-top: 3px; }
   .meta { font-size: 13px; color: #9aa3b2; margin-left: auto; text-align: right; }
   button { background: #2d6cdf; color: #fff; border: 0; padding: 8px 14px;
            border-radius: 8px; font-size: 13px; cursor: pointer; }
@@ -463,7 +544,10 @@ PAGE_HTML = """<!doctype html>
 </style></head>
 <body>
 <header>
-  <h1>🌡️ Midea PortaSplit Watcher</h1>
+  <div>
+    <h1>🌡️ Midea PortaSplit Watcher</h1>
+    <div id="scope" class="scope"></div>
+  </div>
   <button id="checkBtn" onclick="checkNow()">Jetzt prüfen</button>
   <div class="meta">
     <div id="status">lädt…</div>
@@ -481,17 +565,23 @@ async function load(){
     document.getElementById("status").textContent =
       (d.checking ? "⏳ prüfe gerade…" : "Letzte Prüfung: " + fmt(d.last_run)) +
       (d.send_mail ? " · 📧 E-Mail an" : "") ;
+    document.getElementById("scope").textContent = d.scope || "";
     document.getElementById("checkBtn").disabled = d.checking;
     const g = document.getElementById("grid");
     if(!d.results.length){ g.innerHTML = '<div class="empty">Noch keine Daten – erste Prüfung läuft…</div>'; return; }
     g.innerHTML = d.results.map(p => {
       const cls = p.status === "in_stock" ? "in" : p.status === "out_of_stock" ? "out" : "unknown";
       const label = p.status === "in_stock" ? "VERFÜGBAR" : p.status === "out_of_stock" ? "Ausverkauft" : "Unbekannt";
+      const where = p.kind === "store"
+        ? `📍 ${p.store || p.city || "Filiale"}${p.distance_km != null ? " · " + p.distance_km + " km" : ""}`
+        : "🌐 Online";
+      const title = `${p.retailer ? "["+p.retailer+"] " : ""}${p.name}`;
+      const name = p.url ? `<a href="${p.url}" target="_blank" rel="noopener">${title}</a>` : title;
       return `<div class="card ${cls}">
         <span class="dot"></span>
         <div class="info">
-          <div class="name"><a href="${p.url}" target="_blank" rel="noopener">${p.retailer ? "["+p.retailer+"] " : ""}${p.name}</a></div>
-          <div class="sub">${p.detail || ""}</div>
+          <div class="name">${name}</div>
+          <div class="sub">${where} · ${p.detail || ""}</div>
         </div>
         <div class="price">${p.price || ""}</div>
         <span class="badge">${label}</span>
@@ -550,9 +640,22 @@ def _make_handler():
 def serve(cfg: dict, state_path: str, host: str, port: int) -> None:
     interval = int(cfg.get("check_interval_seconds", 300))
     send_mail = bool(cfg.get("ui_send_mail", False))
+    selected = select_products(cfg)
+    n_online = sum(1 for _, d in selected if d is None)
+    n_store = len(selected) - n_online
+    loc = cfg.get("location") or {}
+    scope_parts = []
+    if cfg.get("include_online", True):
+        scope_parts.append(f"{n_online} Online")
+    if cfg.get("include_local_stores", True) and loc:
+        scope_parts.append(
+            f"{n_store} Filialen ≤ {loc.get('radius_km')} km um {loc.get('name', '?')}"
+        )
+    scope = " · ".join(scope_parts)
     with _dash_lock:
         _dashboard["interval"] = interval
         _dashboard["send_mail"] = send_mail
+        _dashboard["scope"] = scope
 
     def worker():
         while not _stop.is_set():

@@ -4,6 +4,16 @@
   "ui_send_mail": false,
   "_comment_ui_send_mail": "If true, the web dashboard (--serve) ALSO sends the e-mail alert on top of showing it in the UI. Default false = UI only.",
 
+  "include_online": true,
+  "include_local_stores": true,
+  "_comment_scope": "Search is limited to online offers + physical stores within radius_km of the location below. Stores outside the radius are filtered out automatically.",
+  "location": {
+    "name": "Osnabrück",
+    "lat": 52.2799,
+    "lon": 8.0472,
+    "radius_km": 100
+  },
+
   "email": {
     "to_addr": "albert.schuetz1@gmx.de",
     "from_addr": "albert.schuetz1@gmx.de",
@@ -16,24 +26,109 @@
 
   "products": [
     {
+      "kind": "online",
       "name": "Midea mobile Split-Klimaanlage PortaSplit",
       "retailer": "OBI",
       "url": "https://www.obi.de/p/8620890/midea-mobile-split-klimaanlage-portasplit"
     },
     {
+      "kind": "online",
       "name": "Midea Mobiles Klimagerät PortaSplit 12000 BTU/h",
       "retailer": "toom",
       "url": "https://toom.de/p/mobiles-klimageraet-portasplit-12000-btuh/9350668"
     },
     {
+      "kind": "online",
       "name": "Midea Split-Klimaanlage PortaSplit Cool 8000 BTU/h",
       "retailer": "toom",
       "url": "https://toom.de/p/split-klimaanlage-portasplit-cool-8000btuh/10515238"
     },
     {
+      "kind": "online",
       "name": "Midea Klimasplitgerät PortaSplit 12.000 BTU",
       "retailer": "BAUHAUS",
       "url": "https://www.bauhaus.info/klimaanlagen/midea-klimasplitgeraet-portasplit-12000-btu/p/31934233"
+    },
+
+    {
+      "kind": "store",
+      "name": "Midea PortaSplit 12.000 BTU",
+      "retailer": "HORNBACH",
+      "store": "HORNBACH Osnabrück",
+      "city": "Osnabrück",
+      "lat": 52.2860,
+      "lon": 8.0150,
+      "url": "TODO: Markt-Verfügbarkeits-URL für diesen Markt eintragen"
+    },
+    {
+      "kind": "store",
+      "name": "Midea PortaSplit 12.000 BTU",
+      "retailer": "BAUHAUS",
+      "store": "BAUHAUS Osnabrück",
+      "city": "Osnabrück",
+      "lat": 52.2599,
+      "lon": 8.0780,
+      "url": "TODO: Markt-Verfügbarkeits-URL für diesen Markt eintragen"
+    },
+    {
+      "kind": "store",
+      "name": "Midea PortaSplit 12.000 BTU",
+      "retailer": "toom",
+      "store": "toom Osnabrück",
+      "city": "Osnabrück",
+      "lat": 52.2700,
+      "lon": 8.0600,
+      "url": "TODO: Markt-Verfügbarkeits-URL für diesen Markt eintragen"
+    },
+    {
+      "kind": "store",
+      "name": "Midea PortaSplit 12.000 BTU",
+      "retailer": "OBI",
+      "store": "OBI Ibbenbüren",
+      "city": "Ibbenbüren",
+      "lat": 52.2779,
+      "lon": 7.7148,
+      "url": "TODO: Markt-Verfügbarkeits-URL für diesen Markt eintragen"
+    },
+    {
+      "kind": "store",
+      "name": "Midea PortaSplit 12.000 BTU",
+      "retailer": "toom",
+      "store": "toom Rheine",
+      "city": "Rheine",
+      "lat": 52.2799,
+      "lon": 7.4406,
+      "url": "TODO: Markt-Verfügbarkeits-URL für diesen Markt eintragen"
+    },
+    {
+      "kind": "store",
+      "name": "Midea PortaSplit 12.000 BTU",
+      "retailer": "OBI",
+      "store": "OBI Münster",
+      "city": "Münster",
+      "lat": 51.9607,
+      "lon": 7.6261,
+      "url": "TODO: Markt-Verfügbarkeits-URL für diesen Markt eintragen"
+    },
+    {
+      "kind": "store",
+      "name": "Midea PortaSplit 12.000 BTU",
+      "retailer": "BAUHAUS",
+      "store": "BAUHAUS Bielefeld",
+      "city": "Bielefeld",
+      "lat": 52.0302,
+      "lon": 8.5325,
+      "url": "TODO: Markt-Verfügbarkeits-URL für diesen Markt eintragen"
+    },
+    {
+      "kind": "store",
+      "name": "Midea PortaSplit 12.000 BTU (außerhalb 100 km – wird gefiltert)",
+      "retailer": "toom",
+      "store": "toom Bremen",
+      "city": "Bremen",
+      "lat": 53.0793,
+      "lon": 8.8017,
+      "url": "TODO: Markt-Verfügbarkeits-URL für diesen Markt eintragen"
     }
   ]
 }
