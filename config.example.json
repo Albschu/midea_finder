@@ -1,6 +1,8 @@
 {
   "check_interval_seconds": 300,
   "request_delay_seconds": 2,
+  "ui_send_mail": false,
+  "_comment_ui_send_mail": "If true, the web dashboard (--serve) ALSO sends the e-mail alert on top of showing it in the UI. Default false = UI only.",
 
   "email": {
     "to_addr": "albert.schuetz1@gmx.de",

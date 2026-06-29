@@ -88,5 +88,46 @@ check("email contains product name", "PortaSplit" in body, True)
 check("email contains url", "https://x" in body, True)
 check("email To header", msg["To"], "albert.schuetz1@gmx.de")
 
+# 8. run_once returns (results, newly_available) and detects out->in transition.
+import json
+import os
+import tempfile
+
+_html_by_url = {}
+mf.fetch = lambda url, timeout=25: _html_by_url[url]  # stub out the network
+
+cfg2 = {
+    "request_delay_seconds": 0,
+    "products": [
+        {"name": "P-A", "retailer": "OBI", "url": "https://shop/a"},
+        {"name": "P-B", "retailer": "toom", "url": "https://shop/b"},
+    ],
+}
+tmp_state = os.path.join(tempfile.gettempdir(), "mf_test_state.json")
+if os.path.exists(tmp_state):
+    os.remove(tmp_state)
+
+# first run: A out, B out  -> no transition
+_html_by_url = {"https://shop/a": html_out, "https://shop/b": html_out}
+results, newly = mf.run_once(cfg2, tmp_state, verbose=False, send_mail=False)
+check("run_once returns full results", len(results), 2)
+check("first run: nothing newly available", len(newly), 0)
+
+# second run: A now in stock -> one transition
+_html_by_url = {"https://shop/a": html_in, "https://shop/b": html_out}
+results, newly = mf.run_once(cfg2, tmp_state, verbose=False, send_mail=False)
+check("second run: one newly available", len(newly), 1)
+check("the right product transitioned", newly[0]["name"], "P-A")
+
+# third run: A still in stock -> no repeat alert
+results, newly = mf.run_once(cfg2, tmp_state, verbose=False, send_mail=False)
+check("third run: no repeat alert", len(newly), 0)
+os.remove(tmp_state)
+
+# 9. UI page + dashboard JSON are well-formed.
+check("page has title", "Midea PortaSplit Watcher" in mf.PAGE_HTML, True)
+check("page polls status endpoint", "/api/status" in mf.PAGE_HTML, True)
+check("dashboard is JSON-serializable", isinstance(json.dumps(mf._dashboard), str), True)
+
 print(f"\n{PASSED} passed, {FAILED} failed")
 raise SystemExit(1 if FAILED else 0)

@@ -37,11 +37,13 @@ import re
 import smtplib
 import ssl
 import sys
+import threading
 import time
 import zlib
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from html import unescape
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -315,10 +317,20 @@ def send_email(cfg: dict, msg: EmailMessage) -> None:
 # --------------------------------------------------------------------------- #
 # Core run
 # --------------------------------------------------------------------------- #
-def run_once(cfg: dict, state_path: str, verbose: bool = True) -> list[dict]:
-    """Check all products once, e-mail on out->in transitions, update state."""
+def run_once(cfg: dict, state_path: str, verbose: bool = True, send_mail: bool = True):
+    """
+    Check all products once and update state.
+
+    On an out->in transition the product is collected as "newly available";
+    if send_mail is True an e-mail is sent for those products.
+
+    Returns (results, newly_available) where results is the full list of every
+    product's current result and newly_available is the subset that just came
+    back in stock.
+    """
     state = load_state(state_path)
     products = cfg.get("products", [])
+    results = []
     newly_available = []
 
     for product in products:
@@ -326,6 +338,7 @@ def run_once(cfg: dict, state_path: str, verbose: bool = True) -> list[dict]:
         key = result["url"]
         prev = state.get(key, {}).get("status", STATUS_UNKNOWN)
         curr = result["status"]
+        result["previous"] = prev
 
         if verbose:
             icon = {"in_stock": "🟢", "out_of_stock": "🔴"}.get(curr, "⚪")
@@ -335,7 +348,7 @@ def run_once(cfg: dict, state_path: str, verbose: bool = True) -> list[dict]:
                 f"-> {curr}{price}  [{result['detail']}]"
             )
 
-        # Alert only on a real transition into stock (was out/unknown -> in).
+        # A real transition into stock (was out/unknown -> in).
         if curr == STATUS_IN and prev in (STATUS_OUT, STATUS_UNKNOWN):
             newly_available.append(result)
 
@@ -346,10 +359,11 @@ def run_once(cfg: dict, state_path: str, verbose: bool = True) -> list[dict]:
             "retailer": result.get("retailer"),
             "last_checked": result["checked_at"],
         }
+        results.append(result)
         # be polite between requests
         time.sleep(cfg.get("request_delay_seconds", 2))
 
-    if newly_available:
+    if newly_available and send_mail:
         if verbose:
             print(f"\n📧 {len(newly_available)} product(s) back in stock - sending e-mail...")
         try:
@@ -364,7 +378,7 @@ def run_once(cfg: dict, state_path: str, verbose: bool = True) -> list[dict]:
                 state[item["url"]]["status"] = STATUS_OUT
 
     save_state(state_path, state)
-    return newly_available
+    return results, newly_available
 
 
 def run_loop(cfg: dict, state_path: str) -> None:
@@ -373,7 +387,7 @@ def run_loop(cfg: dict, state_path: str) -> None:
     while True:
         print(f"--- check at {now_iso()} ---")
         try:
-            run_once(cfg, state_path)
+            run_once(cfg, state_path, send_mail=True)
         except Exception as exc:  # noqa: BLE001 - keep the loop alive
             print(f"Run failed: {exc}", file=sys.stderr)
         print(f"--- sleeping {interval}s ---\n")
@@ -395,6 +409,187 @@ def test_email(cfg: dict) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Web UI (zero-dependency dashboard)
+# --------------------------------------------------------------------------- #
+# Shared between the background checker thread and the HTTP handlers.
+_dash_lock = threading.Lock()
+_dashboard = {
+    "results": [],
+    "last_run": None,       # ISO string of the last completed check
+    "next_run_epoch": None,  # unix ts when the next check is due
+    "interval": 300,
+    "checking": False,
+    "send_mail": False,
+}
+_check_now = threading.Event()   # set by the UI "Check now" button
+_stop = threading.Event()
+
+PAGE_HTML = """<!doctype html>
+<html lang="de"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Midea PortaSplit Watcher</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         margin: 0; background: #0f1115; color: #e6e8eb; }
+  header { padding: 20px 24px; background: #171a21; border-bottom: 1px solid #262b35;
+           display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  .meta { font-size: 13px; color: #9aa3b2; margin-left: auto; text-align: right; }
+  button { background: #2d6cdf; color: #fff; border: 0; padding: 8px 14px;
+           border-radius: 8px; font-size: 13px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  main { padding: 16px 24px 40px; max-width: 1000px; margin: 0 auto; }
+  .grid { display: grid; gap: 12px; }
+  .card { background: #171a21; border: 1px solid #262b35; border-radius: 12px;
+          padding: 14px 16px; display: flex; align-items: center; gap: 14px; }
+  .card.in { border-color: #2e7d44; box-shadow: 0 0 0 1px #2e7d4455; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+  .in .dot { background: #3fb950; } .out .dot { background: #f85149; }
+  .unknown .dot { background: #8b949e; }
+  .info { flex: 1; min-width: 0; }
+  .name { font-weight: 600; font-size: 15px; }
+  .sub { font-size: 12px; color: #9aa3b2; margin-top: 2px;
+         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; }
+  .in .badge { background: #2e7d4433; color: #3fb950; }
+  .out .badge { background: #f8514922; color: #f85149; }
+  .unknown .badge { background: #8b949e22; color: #b6bdc7; }
+  .price { font-weight: 600; font-size: 14px; min-width: 90px; text-align: right; }
+  a { color: #6cb0ff; text-decoration: none; } a:hover { text-decoration: underline; }
+  .empty { color: #9aa3b2; padding: 40px; text-align: center; }
+</style></head>
+<body>
+<header>
+  <h1>🌡️ Midea PortaSplit Watcher</h1>
+  <button id="checkBtn" onclick="checkNow()">Jetzt prüfen</button>
+  <div class="meta">
+    <div id="status">lädt…</div>
+    <div id="timer"></div>
+  </div>
+</header>
+<main><div id="grid" class="grid"></div></main>
+<script>
+let nextEpoch = null;
+function fmt(ts){ if(!ts) return "–"; return new Date(ts).toLocaleString("de-DE"); }
+async function load(){
+  try {
+    const r = await fetch("/api/status"); const d = await r.json();
+    nextEpoch = d.next_run_epoch ? d.next_run_epoch*1000 : null;
+    document.getElementById("status").textContent =
+      (d.checking ? "⏳ prüfe gerade…" : "Letzte Prüfung: " + fmt(d.last_run)) +
+      (d.send_mail ? " · 📧 E-Mail an" : "") ;
+    document.getElementById("checkBtn").disabled = d.checking;
+    const g = document.getElementById("grid");
+    if(!d.results.length){ g.innerHTML = '<div class="empty">Noch keine Daten – erste Prüfung läuft…</div>'; return; }
+    g.innerHTML = d.results.map(p => {
+      const cls = p.status === "in_stock" ? "in" : p.status === "out_of_stock" ? "out" : "unknown";
+      const label = p.status === "in_stock" ? "VERFÜGBAR" : p.status === "out_of_stock" ? "Ausverkauft" : "Unbekannt";
+      return `<div class="card ${cls}">
+        <span class="dot"></span>
+        <div class="info">
+          <div class="name"><a href="${p.url}" target="_blank" rel="noopener">${p.retailer ? "["+p.retailer+"] " : ""}${p.name}</a></div>
+          <div class="sub">${p.detail || ""}</div>
+        </div>
+        <div class="price">${p.price || ""}</div>
+        <span class="badge">${label}</span>
+      </div>`;
+    }).join("");
+  } catch(e){ document.getElementById("status").textContent = "Verbindung verloren…"; }
+}
+function tick(){
+  if(nextEpoch){
+    const s = Math.max(0, Math.round((nextEpoch - Date.now())/1000));
+    document.getElementById("timer").textContent = "Nächste Prüfung in " + s + "s";
+  }
+}
+async function checkNow(){
+  document.getElementById("checkBtn").disabled = true;
+  await fetch("/api/check", {method:"POST"}); setTimeout(load, 500);
+}
+load(); setInterval(load, 5000); setInterval(tick, 1000);
+</script>
+</body></html>
+"""
+
+
+def _make_handler():
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, code, body, content_type="application/json"):
+            data = body.encode("utf-8") if isinstance(body, str) else body
+            self.send_response(code)
+            self.send_header("Content-Type", content_type + "; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            if self.path in ("/", "/index.html"):
+                self._send(200, PAGE_HTML, "text/html")
+            elif self.path == "/api/status":
+                with _dash_lock:
+                    self._send(200, json.dumps(_dashboard))
+            else:
+                self._send(404, json.dumps({"error": "not found"}))
+
+        def do_POST(self):
+            if self.path == "/api/check":
+                _check_now.set()
+                self._send(200, json.dumps({"ok": True}))
+            else:
+                self._send(404, json.dumps({"error": "not found"}))
+
+        def log_message(self, *args):  # silence default request logging
+            pass
+
+    return Handler
+
+
+def serve(cfg: dict, state_path: str, host: str, port: int) -> None:
+    interval = int(cfg.get("check_interval_seconds", 300))
+    send_mail = bool(cfg.get("ui_send_mail", False))
+    with _dash_lock:
+        _dashboard["interval"] = interval
+        _dashboard["send_mail"] = send_mail
+
+    def worker():
+        while not _stop.is_set():
+            with _dash_lock:
+                _dashboard["checking"] = True
+            try:
+                results, _ = run_once(cfg, state_path, verbose=False, send_mail=send_mail)
+            except Exception as exc:  # noqa: BLE001 - keep the UI alive
+                results = [{
+                    "name": "Prüfung fehlgeschlagen", "retailer": "", "url": "#",
+                    "status": STATUS_UNKNOWN, "price": None, "detail": str(exc),
+                }]
+            with _dash_lock:
+                _dashboard["results"] = results
+                _dashboard["last_run"] = now_iso()
+                _dashboard["checking"] = False
+                _dashboard["next_run_epoch"] = int(time.time()) + interval
+            # wait for the interval, but wake early on a manual "Check now"
+            _check_now.wait(interval)
+            _check_now.clear()
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    httpd = ThreadingHTTPServer((host, port), _make_handler())
+    url = f"http://{host}:{port}"
+    print(f"Midea PortaSplit dashboard running at {url}")
+    print(f"Checking every {interval}s. Open the URL in your browser. Ctrl+C to stop.")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopping…")
+    finally:
+        _stop.set()
+        httpd.shutdown()
+
+
+# --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
 def main(argv=None) -> int:
@@ -403,9 +598,12 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--config", default=DEFAULT_CONFIG_PATH, help="path to config.json")
     parser.add_argument("--state", default=DEFAULT_STATE_PATH, help="path to state.json")
+    parser.add_argument("--host", default="127.0.0.1", help="web UI bind host (--serve)")
+    parser.add_argument("--port", type=int, default=8765, help="web UI port (--serve)")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--once", action="store_true", help="run a single check (default)")
-    mode.add_argument("--loop", action="store_true", help="run forever on an interval")
+    mode.add_argument("--serve", action="store_true", help="run the live web dashboard (default)")
+    mode.add_argument("--once", action="store_true", help="run a single check and exit")
+    mode.add_argument("--loop", action="store_true", help="run forever on an interval (e-mail mode)")
     mode.add_argument("--test-email", action="store_true", help="send a test e-mail and exit")
     args = parser.parse_args(argv)
 
@@ -417,9 +615,12 @@ def main(argv=None) -> int:
     if args.loop:
         run_loop(cfg, args.state)
         return 0
+    if args.once:
+        run_once(cfg, args.state, send_mail=True)
+        return 0
 
-    # default: single run
-    run_once(cfg, args.state)
+    # default: the web dashboard
+    serve(cfg, args.state, args.host, args.port)
     return 0
 
 

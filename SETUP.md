@@ -1,10 +1,10 @@
-# Complete Setup Guide — from clone to permanently running
+# Complete Setup Guide — from clone to running
 
-This walks you through everything needed to run **midea_finder** forever on an
-always-on Linux machine, so it e-mails `albert.schuetz1@gmx.de` the moment a
-Midea PortaSplit is back in stock.
+This walks you through running **midea_finder** on your own PC and watching a
+**live web dashboard** that shows which Midea PortaSplit offers are in stock
+right now.
 
-Estimated time: ~10 minutes.
+Estimated time: ~5 minutes.
 
 ---
 
@@ -24,7 +24,7 @@ sudo apt update && sudo apt install -y python3 git
 ```
 
 There is **nothing else to install** — midea_finder uses only the Python
-standard library.
+standard library, and the dashboard runs in the browser you already have.
 
 ---
 
@@ -36,46 +36,21 @@ git clone https://github.com/Albschu/midea_finder.git
 cd midea_finder
 ```
 
-You should now see `midea_finder.py`, `config.example.json`, `install-linux.sh`,
-etc. (`ls`).
-
 ---
 
-## 2. Prepare your GMX mailbox (one-time, important)
-
-GMX blocks programs from sending mail until you switch it on:
-
-1. Log in at **gmx.net**.
-2. Go to **Einstellungen → POP3 / IMAP Abruf**.
-3. Enable **"POP3 und IMAP Zugriff erlauben"** and save.
-
-That's the account the program will *log in to* in order to send the alert.
-You can send the alert from your own address to your own address — that's fine.
-
-> If you have two-factor authentication on GMX, create an **app-specific
-> password** and use that instead of your normal password.
-
----
-
-## 3. Create and review your config
+## 2. Create your config
 
 ```bash
 cp config.example.json config.json
 ```
 
-Open `config.json` and check these fields:
+Open `config.json` if you want to adjust anything:
 
 ```json
 {
-  "check_interval_seconds": 300,          // how often to check (300 = every 5 min)
-  "email": {
-    "to_addr":   "albert.schuetz1@gmx.de",  // who gets the alert (you)
-    "from_addr": "albert.schuetz1@gmx.de",  // sender (your GMX address)
-    "smtp_host": "mail.gmx.net",            // correct for GMX
-    "smtp_port": 465,
-    "smtp_ssl":  true
-  },
-  "products": [ ... ]                       // the shop pages to watch
+  "check_interval_seconds": 300,   // how often to check (300 = every 5 min)
+  "ui_send_mail": false,           // true = ALSO send e-mail (see step 5)
+  "products": [ ... ]              // shop pages to watch
 }
 ```
 
@@ -86,100 +61,116 @@ BAUHAUS. Add or remove entries freely — each is just:
 { "name": "...", "retailer": "...", "url": "https://..." }
 ```
 
-> **Do not** put your password in this file. Credentials are handled in the next
-> step. `config.json` is git-ignored, so your settings stay local.
+`config.json` is git-ignored, so your settings stay local.
 
 ---
 
-## 4. Install and start it (one command)
+## 3. Start the dashboard
 
 ```bash
-./install-linux.sh
+python3 midea_finder.py
 ```
 
-The script does the whole setup for you:
+You'll see:
 
-1. asks for your **GMX login and password** and stores them in
-   `~/.config/midea-finder.env` with `600` permissions (only you can read it);
-2. sends a **test e-mail** so you immediately know SMTP works;
-3. enables **linger** so the service keeps running when you log out and starts
-   again after a reboot;
-4. installs and starts the systemd service `midea-finder-loop.service`.
-
-**Check your inbox for the test e-mail.** If it arrived, everything is wired up
-correctly and the watcher is already running.
-
-If the script can't enable linger automatically, it will print one command to
-run with `sudo` — run it, that's all.
+```
+Midea PortaSplit dashboard running at http://127.0.0.1:8765
+Checking every 300s. Open the URL in your browser. Ctrl+C to stop.
+```
 
 ---
 
-## 5. Confirm it's running
+## 4. Open it in your browser
 
-```bash
-systemctl --user status midea-finder-loop.service
-```
+Go to **http://127.0.0.1:8765**.
 
-You want to see **`active (running)`**. To watch it work in real time:
+You get one card per product with:
 
-```bash
-journalctl --user -u midea-finder-loop.service -f
-```
+- a **live status** — 🟢 **VERFÜGBAR**, 🔴 **Ausverkauft**, ⚪ Unbekannt,
+- the **price** and a **link** straight to the shop,
+- a **countdown** to the next automatic check,
+- a **"Jetzt prüfen"** button to check immediately.
 
-Every cycle prints one line per product, e.g.:
+The page refreshes itself every few seconds — just leave the tab open. When a
+product turns 🟢, its card is highlighted. That's it. ✅
 
-```
-🔴 OBI       Midea mobile Split-Klimaanlage PortaSplit     -> out_of_stock  [JSON-LD availability=...outofstock]
-🟢 toom      Midea Mobiles Klimagerät PortaSplit 12000 BTU -> in_stock      [JSON-LD availability=...instock]
-```
-
-When something flips from 🔴 to 🟢 you'll get the e-mail. Press `Ctrl+C` to stop
-following the log (this does **not** stop the service).
+> Keep the terminal window open (or set up the autostart service in step 6).
+> Closing it stops the dashboard.
 
 ---
 
-## 6. Day-to-day management
+## 5. (Optional) Also get an e-mail alert
+
+If you want an e-mail in addition to the dashboard:
+
+1. In **gmx.net** → **Einstellungen → POP3 / IMAP Abruf**, enable
+   **"POP3 und IMAP Zugriff erlauben"** (one-time). With 2FA, create an
+   **app-specific password**.
+2. Set `"ui_send_mail": true` in `config.json`.
+3. Provide credentials and verify:
+
+   ```bash
+   export MIDEA_SMTP_USER="dein-login@gmx.de"
+   export MIDEA_SMTP_PASS="dein-passwort-oder-app-passwort"
+   python3 midea_finder.py --test-email     # check your inbox
+   python3 midea_finder.py                   # dashboard now also e-mails
+   ```
+
+---
+
+## 6. (Optional) Start automatically on boot
+
+To make the dashboard launch on every boot and restart itself if it crashes,
+install it as a systemd *user* service:
 
 ```bash
-# after editing config.json (e.g. new products / different interval):
-systemctl --user restart midea-finder-loop.service
-
-# pause it temporarily:
-systemctl --user stop midea-finder-loop.service
-
-# start again:
-systemctl --user start midea-finder-loop.service
-
-# stop permanently and remove from autostart:
-systemctl --user disable --now midea-finder-loop.service
+cp systemd/midea-finder-ui.service ~/.config/systemd/user/
+sed -i "s|%h/midea_finder|$PWD|g" ~/.config/systemd/user/midea-finder-ui.service
+loginctl enable-linger "$USER"
+systemctl --user daemon-reload
+systemctl --user enable --now midea-finder-ui.service
 ```
 
-To **update** to a newer version later:
+Manage it:
+
+```bash
+systemctl --user status  midea-finder-ui.service     # running?
+journalctl  --user -u     midea-finder-ui.service -f  # logs
+systemctl --user restart midea-finder-ui.service      # after editing config.json
+systemctl --user disable --now midea-finder-ui.service  # stop for good
+```
+
+(If you enabled `ui_send_mail`, also uncomment the `EnvironmentFile` line in the
+unit and put your credentials in `~/.config/midea-finder.env`.)
+
+---
+
+## 7. Update later
 
 ```bash
 cd ~/midea_finder
 git pull
-systemctl --user restart midea-finder-loop.service
+# if running as a service:
+systemctl --user restart midea-finder-ui.service
 ```
 
 ---
 
-## 7. Troubleshooting
+## Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
-| No test e-mail arrived | Re-check step 2 (POP3/IMAP enabled) and your login/password. Re-run `./install-linux.sh` or test directly: `set -a; source ~/.config/midea-finder.env; set +a; python3 midea_finder.py --test-email` |
-| `Authentication failed` in logs | Wrong password, or 2FA is on → create a GMX **app password** and update `~/.config/midea-finder.env` |
-| A product always shows `unknown` | That shop blocked the plain request, or changed its page. The run continues; other products still work. |
-| Service not running after reboot | Make sure linger is on: `loginctl enable-linger $USER`, then `systemctl --user enable --now midea-finder-loop.service` |
-| Laptop only checks while awake | A sleeping/suspended laptop pauses the timer. Use a machine that stays awake, or disable sleep. |
+| Browser can't reach the page | Make sure the program is still running; confirm the port (default `8765`). Use a different one with `--port 9000`. |
+| Want to view it from another device | Start with `--host 0.0.0.0` and open `http://<this-pc-ip>:8765` (same network only). |
+| A product always shows ⚪ Unbekannt | That shop blocked the request or changed its page layout. Other products are unaffected. |
+| Laptop only updates while awake | A sleeping/suspended laptop pauses checks. Use a machine that stays awake, or disable sleep. |
+| Test e-mail didn't arrive (step 5) | Recheck POP3/IMAP is enabled and the login/password; with 2FA use an app password. |
 
 ---
 
-## How it decides "back in stock"
+## How it decides "in stock"
 
 For each product page it reads the shop's **schema.org availability data**
 (`InStock` / `OutOfStock`) and, as a fallback, scans the visible German text
 ("In den Warenkorb" / "nicht verfügbar" …). It remembers the previous status in
-`state.json` and e-mails you **only on an out-of-stock → in-stock transition**,
-so you won't get repeat mails while the item stays available.
+`state.json`, so a product that turns green is recognised as *newly* available.

@@ -1,0 +1,17 @@
+[Unit]
+Description=Midea PortaSplit live web dashboard (--serve)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# --- adjust WorkingDirectory if you cloned somewhere other than ~/midea_finder ---
+WorkingDirectory=%h/midea_finder
+ExecStart=/usr/bin/python3 %h/midea_finder/midea_finder.py --serve --host 127.0.0.1 --port 8765
+# only needed if ui_send_mail is true in config.json:
+# EnvironmentFile=%h/.config/midea-finder.env
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target
