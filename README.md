@@ -9,6 +9,9 @@ that was sold out becomes available again** — straight to
 No external dependencies — it uses only the Python standard library
 (Python 3.8+).
 
+> **New here?** Follow [`SETUP.md`](SETUP.md) for a complete step-by-step guide
+> from cloning the repo to letting it run permanently.
+
 ## How it works
 
 1. For every product in `config.json` it downloads the retailer's product page.
