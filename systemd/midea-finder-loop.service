@@ -1,0 +1,18 @@
+[Unit]
+Description=Midea PortaSplit stock watcher (continuous --loop)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# --- adjust WorkingDirectory if you cloned somewhere other than ~/midea_finder ---
+WorkingDirectory=%h/midea_finder
+ExecStart=/usr/bin/python3 %h/midea_finder/midea_finder.py --loop
+# SMTP credentials live in a 0600 file, NOT in this unit (see install-linux.sh)
+EnvironmentFile=%h/.config/midea-finder.env
+# keep it alive forever: restart on crash, on clean exit, on reboot
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target

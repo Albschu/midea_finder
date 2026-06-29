@@ -69,23 +69,46 @@ python3 midea_finder.py --test-email
 Add or remove retailers freely — just add another entry to `products`.
 The known Midea PortaSplit product pages are pre-filled.
 
-## Run it automatically
+## Run it permanently on your own Linux machine (recommended)
 
-**cron** (every 5 minutes):
+If you have a machine that stays on, the easiest way to run the watcher
+**forever** is the included installer. It registers a systemd *user* service
+that starts on boot, restarts itself if it ever crashes, and keeps running
+even when you are logged out:
+
+```bash
+./install-linux.sh
+```
+
+The script will:
+1. create `config.json` (if missing),
+2. ask for your GMX login + password and store them in `~/.config/midea-finder.env` (permissions `600`),
+3. send a test e-mail to confirm SMTP works,
+4. enable *linger* so the service survives logout / reboots,
+5. enable and start `midea-finder-loop.service`.
+
+Handy commands afterwards:
+
+```bash
+systemctl --user status midea-finder-loop.service     # is it running?
+journalctl --user -u midea-finder-loop.service -f      # live logs
+systemctl --user restart midea-finder-loop.service     # after editing config.json
+systemctl --user disable --now midea-finder-loop.service  # stop for good
+```
+
+The watcher checks every `check_interval_seconds` (default 300s = 5 min).
+
+### Alternatives
+
+**cron** (every 5 minutes, one-shot mode):
 
 ```cron
 */5 * * * * MIDEA_SMTP_USER='you@gmx.de' MIDEA_SMTP_PASS='secret' \
   /usr/bin/python3 /path/to/midea_finder/midea_finder.py --once >> /path/to/midea_finder/run.log 2>&1
 ```
 
-**systemd timer** — see `systemd/` for ready-to-edit unit files:
-
-```bash
-cp systemd/midea-finder.* ~/.config/systemd/user/
-# edit the unit to set your paths and SMTP env vars, then:
-systemctl --user daemon-reload
-systemctl --user enable --now midea-finder.timer
-```
+**systemd one-shot timer** — `systemd/midea-finder.service` + `midea-finder.timer`
+run a single check on a schedule instead of a continuous loop.
 
 ## Tests
 
